@@ -1,0 +1,18 @@
+flowchart TD
+    A["输入<br/>.osu 文件 + 音频文件"] --> B["解析 .osu<br/>提取 timing points / hit objects / key count"]
+    B --> C["时间量化<br/>把毫秒时间转换为统一 ticks<br/>例如 1 beat = 48 ticks"]
+    C --> D["构建事件序列<br/>合并同一时刻的 note 为一个 event<br/>得到 delta_tick / lane_mask / chord_size / snap_class"]
+    C --> E["构建局部 grid tensor<br/>grid[tick, lane, channel]"]
+    A --> F["提取音频特征<br/>mel spectrogram / onset / RMS"]
+
+    E --> G["提取 grid 统计特征<br/>density / jack_ratio / chord_size / left-right bias"]
+    D --> H["构造训练样本"]
+    F --> H
+    G --> H
+
+    H --> I["模型输入<br/>past_events + audio_window + grid_stats + style_id"]
+    I --> J["模型输出<br/>next_event<br/>delta_tick + lane_mask + optional hold info"]
+
+    J --> K["连续生成事件序列<br/>逐步预测后续 notes/chords"]
+    K --> L["反量化回时间<br/>tick -> ms"]
+    L --> M["写回 .osu<br/>生成新的 osu!mania 7k 谱面"]

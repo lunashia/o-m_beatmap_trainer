@@ -1,0 +1,16 @@
+flowchart LR
+    A[".osu 文本"] --> B["parsed_chart"]
+    B --> C["quantized_notes"]
+    C --> D["events"]
+    C --> E["grid"]
+    F["audio"] --> G["mel features"]
+
+    E --> H["grid_stats"]
+    D --> I["training sample X"]
+    G --> I
+    H --> I
+
+    I --> J["model"]
+    J --> K["predicted next_event"]
+    K --> L["generated events"]
+    L --> M["generated .osu"]
