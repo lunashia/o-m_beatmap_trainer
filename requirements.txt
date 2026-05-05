@@ -1,0 +1,7 @@
+# Python 3.11
+numpy>=1.26,<2.0
+librosa>=0.10,<0.12
+
+# Choose the appropriate PyTorch build for your machine (CPU/CUDA):
+# https://pytorch.org/get-started/locally/
+torch>=2.2,<2.6
