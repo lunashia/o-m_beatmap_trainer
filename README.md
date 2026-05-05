@@ -108,9 +108,3 @@ Typical locations (from `configs/train.yaml`):
   - Set `train.device` to `cpu` or fix CUDA/PyTorch install.
 - Disk/memory pressure during cache/train:
   - Free space first; cache shards and checkpoints can grow quickly.
-
-## Publish Rules (Git Hygiene)
-
-- Do not commit generated outputs or local caches:
-  - `data/cache*`, `artifacts*`, `outputs*`, `__pycache__`, `.tmp_test_*`
-- Keep `.gitignore` aligned with this rule before every commit.
