@@ -1,11 +1,10 @@
 # Project Overview
 
-This project trains an osu!mania (7k) next-event baseline model from beatmap/audio-derived features, then evaluates and runs inference with the same frozen vocabulary and cache conventions.
+This project trains an osu!mania (7k) next-event baseline model from beatmap/audio-derived features。
 
 ## 1) Project Goal
 
-- Build a reproducible training pipeline for osu!mania 7k.
-- Produce stable artifacts: dataset splits, cache shards, vocab snapshot, checkpoints, metrics, and inference outputs.
+
 
 ## 2) Repository Structure
 
@@ -18,10 +17,8 @@ This project trains an osu!mania (7k) next-event baseline model from beatmap/aud
 
 ## 3) Environment Requirements
 
-- OS: Windows (PowerShell examples below)
 - Python: 3.11+ recommended
 - GPU (optional but recommended): CUDA-compatible setup for `train.device: "cuda"`
-- Disk/Memory: enough free space for cache shards and checkpoints
 
 ## 4) Installation
 
@@ -32,17 +29,11 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If `requirements.txt` is not present yet, create one before migration so the new machine can install the same dependency set.
 
 ## 5) Data Preparation
 
 1. Put training dataset files under `data/osu/`.
 2. Keep generated files out of source control (`data/cache*`, `artifacts*`, `outputs*`).
-3. Quick sanity check:
-
-```powershell
-Get-ChildItem data\osu
-```
 
 ## 6) Run Workflows
 
@@ -106,5 +97,3 @@ Typical locations (from `configs/train.yaml`):
   - Check vocab overwrite/frozen settings in config.
 - CUDA unavailable:
   - Set `train.device` to `cpu` or fix CUDA/PyTorch install.
-- Disk/memory pressure during cache/train:
-  - Free space first; cache shards and checkpoints can grow quickly.
