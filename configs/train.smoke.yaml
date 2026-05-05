@@ -1,0 +1,199 @@
+# Centralized config for data paths, preprocessing, model, and training.
+# Unless noted otherwise, relative paths are resolved from the project root.
+# Keep this file as the single source of truth for manifest, split, cache,
+# vocab, train, eval, and infer inputs/outputs.
+
+# data: shared base directories used by multiple pipeline stages.
+# Relative paths below resolve from the project root.
+data:
+  osu_root: "./data/osu"  # Beatmap root scanned by manifest generation.
+  audio_root: ""  # Optional audio override; empty keeps beatmap-relative audio.
+  cache_dir: "./data/cache_smoke"  # Shared cache base for manifest/split/cache artifacts.
+  output_dir: "./outputs_smoke"  # Shared output base for eval / infer outputs.
+
+# chart: beatmap normalization and lane layout.
+# These values affect manifest filtering, parsing, quantization, and event labels.
+chart:
+  expected_mode: 3  # Only osu!mania; other modes should be rejected upstream.
+  key_count: 7  # 7k only; parser and manifest validation expect this.
+  num_lanes: 7  # Lane count used by quantize, grid, events, and model outputs.
+  lane_x_to_index:  # Stable x-position to lane mapping for osu! stable exports.
+    36: 0
+    109: 1
+    182: 2
+    256: 3
+    329: 4
+    402: 5
+    475: 6
+
+# quantize: tick conversion for hit objects.
+# Must stay aligned with timing-point interpretation used by dataset building.
+quantize:
+  ticks_per_beat: 48  # Conversion granularity; larger values increase tick resolution.
+
+# audio: log-mel feature extraction used by cache build and training.
+# n_mels must match dataset.expected_n_mels and model.in_mels.
+audio:
+  sample_rate: 22050  # Audio is resampled to this rate before mel extraction.
+  n_fft: 2048  # FFT window size; affects time/frequency tradeoff.
+  win_length: 2048  # Explicit window length; if changed, keep in sync with cache build.
+  hop_length: 512  # Frame stride used for mel features and tick->frame mapping.
+  n_mels: 80  # Mel-bin count consumed by dataset and model input layers.
+  fmin: 30.0  # Low-frequency cutoff for mel filterbank.
+  fmax: null  # Null keeps librosa default; set explicitly only if you know why.
+  clip_seconds: null  # Optional pre-cache truncation; null means no clipping.
+
+# dataset: supervised sample windowing from events + audio.
+# These must stay consistent with the model's expected input shapes.
+dataset:
+  context_events: 32  # Number of past events fed into the sequence encoder.
+  audio_window_size: 64  # Centered mel window width in frames.
+  expected_n_mels: 80  # Must equal audio.n_mels and model.in_mels.
+
+# vocab: one frozen token mapping shared by train / eval / infer.
+# Fit on the train cache only, then reuse the same file everywhere. If a
+# vocab hash/checksum is tracked later, it must refer to this exact snapshot.
+vocab:
+  path: "./artifacts_smoke/vocab.json"  # Relative path to the frozen vocab snapshot.
+  fit_from: "train"  # Vocab fitting source; current pipeline supports train only.
+  field: "delta_tick"  # Token field being frozen for event prediction.
+  sources: ["target", "past"]  # Values collected from targets and past events.
+  overwrite: false  # False avoids accidental vocab rebuilds over an existing file.
+  frozen: true  # Must remain true so every stage shares the same token ids.
+  fail_on_unknown: false  # False keeps unknowns from crashing non-training flows.
+  special_tokens:
+    pad: "<PAD>"  # Padding token used for sequence batching.
+    unk: "<UNK>"  # Unknown token used when a value cannot be mapped.
+
+# model: architecture defaults for the next-event predictor.
+# lane_mask uses 128 classes; class 0 is reserved for padding/fallback and
+# supervised targets should remain in 1..127.
+model:
+  delta_vocab_size: 256  # Size of the delta_tick classification head.
+  grid_stats_dim: 10  # Feature width produced by cache/grid statistics.
+  event_encoder_type: "gru"  # "gru" or "transformer"; GRU is the default.
+  delta_embed_dim: 64  # Embedding width for past delta_tick tokens.
+  lane_embed_dim: 32  # Embedding width for past lane_mask tokens (0..127).
+  event_hidden_dim: 128  # Hidden width for the event encoder backbone.
+  transformer_heads: 4  # Transformer-only; ignored by GRU mode.
+  transformer_layers: 2  # Transformer-only; ignored by GRU mode.
+  dropout: 0.1  # Transformer dropout; higher values regularize more aggressively.
+  audio_hidden_dim: 128  # Hidden channels in the audio encoder.
+  audio_out_dim: 128  # Final audio embedding width.
+  stats_hidden_dim: 64  # Hidden width of the grid-stats MLP.
+  stats_out_dim: 64  # Final grid-stats embedding width.
+  fusion_hidden_dim: 256  # Fusion layer width after concatenating modalities.
+  in_mels: 80  # Must equal audio.n_mels and dataset.expected_n_mels.
+
+# train: training runtime, optimization, and artifact layout.
+# train.output.run_dir anchors checkpoints/, metrics.json, train_log.jsonl,
+# config_snapshot.yaml, and vocab.json under one run directory.
+train:
+  seed: 42  # Affects split order, shuffling, and training reproducibility.
+  batch_size: 2  # Per-step batch size; raise only if memory allows.
+  epochs: 1  # Legacy alias; max_epochs is the runtime limit used by train.py.
+  max_epochs: 1  # Maximum epochs to run before stopping.
+  max_steps: 10  # 0 disables step-based early stop; useful for debugging only.
+  grad_accum_steps: 1  # Gradient accumulation factor.
+  grad_clip_norm: 1.0  # 0 disables clipping; positive values limit gradient spikes.
+  log_every_steps: 10  # Logging cadence for training progress.
+  learning_rate: 0.0003  # AdamW learning rate.
+  weight_decay: 0.0001  # AdamW weight decay.
+  device: "cuda"  # Preferred device; falls back if unavailable.
+  num_workers: 0  # DataLoader workers for train/eval/infer loaders.
+  amp:
+    enabled: true  # Mixed precision can speed up CUDA training.
+    dtype: "fp16"  # fp16 or bf16 depending on hardware support.
+  scheduler:
+    name: "none"  # "none" or "cosine" in the current runtime.
+    t_max: 50  # Scheduler horizon when using cosine annealing.
+    min_lr: 0.0  # Floor learning rate for cosine annealing.
+  dataloader:
+    pin_memory: true  # Helpful on CUDA; usually harmless on CPU.
+    persistent_workers: false  # True can reduce worker startup cost for long runs.
+    prefetch_factor: 2  # Batch prefetch depth when num_workers > 0.
+  resume:
+    enabled: false  # Resume from the latest or explicit checkpoint when true.
+    path: ""  # Relative checkpoint path, or empty to use run_dir/checkpoints/last.pt.
+    strict: true  # Strict loading catches architecture/config drift early.
+  output:
+    run_dir: "./artifacts_smoke/train"  # Relative base for checkpoints, metrics, logs, snapshots.
+
+# manifest: discovery stage that scans osu! files and writes the canonical index.
+# Relative paths here resolve from the project root.
+manifest:
+  dataset_root: "./data/osu"  # Root directory searched for .osu files.
+  manifest_path: "./data/cache_smoke/manifest.csv"  # Output CSV written by manifest generation.
+  allowed_modes: "[3]"  # Parsed as a list; keeps only mania charts.
+  allowed_key_counts: "[7]"  # Parsed as a list; keeps only 7k charts.
+  require_audio: true  # True marks charts invalid when the audio file is missing.
+  include_invalid: false  # True keeps invalid rows in the manifest for debugging.
+  osu_pattern: "*.osu"  # File glob(s) used during beatmap discovery.
+  encodings: "utf-8-sig,utf-8,latin-1"  # Fallback encodings tried while reading .osu text.
+
+# cache: preprocess stage that turns manifests into train-cache shards.
+# shard_size controls how many records land in each shard; cache_format controls
+# whether shards are written as PT or NPZ.
+cache:
+  cache_dir: "./data/cache_smoke/train_cache"  # Shard output directory.
+  cache_index_path: "./data/cache_smoke/train_cache/cache_index.csv"  # Index that maps samples to shards.
+  shard_size: 32  # Records per shard before a new file is started.
+  cache_format: "pt"  # "pt" or "npz"; must match the reader in training/eval/infer.
+  overwrite: false  # False prevents accidental cache rebuilds.
+  num_workers: 1  # Parallel cache-building workers.
+  skip_failed_samples: true  # True drops failing samples instead of writing failure records.
+  allowed_key_counts: "[7]"  # Parsed as a list; cache should mirror the manifest key filter.
+  include_invalid: false  # True keeps invalid manifest rows in cache for debugging.
+
+# split: group-wise train/val split.
+# group_by / fallback_group_by prevent song-level leakage by keeping all
+# difficulties from the same song in one split whenever possible.
+split:
+  input_index_path: "./data/cache_smoke/manifest.csv"  # Input manifest CSV produced by build_manifest.
+  output_dir: "./artifacts_smoke/splits"  # Directory for split CSVs and summary JSON.
+  train_path: "./artifacts_smoke/splits/train.csv"  # Train split CSV used by train/cache/vocab.
+  val_path: "./artifacts_smoke/splits/val.csv"  # Validation split CSV used by eval/infer.
+  summary_path: "./artifacts_smoke/splits/split_summary.json"  # Split summary written for auditability.
+  val_ratio: 0.1  # Validation fraction by grouped rows, not by raw sample count.
+  seed: 42  # Reproducibility for group shuffling and split selection.
+  group_by: "set_id"  # Primary song-level grouping key.
+  fallback_group_by: "audio_path"  # Secondary key to prevent cross-diff leakage.
+  valid_only: true  # True excludes invalid manifest rows from the split.
+  shuffle: true  # True shuffles group order before selecting val groups.
+  overwrite: false  # False prevents overwriting existing split artifacts.
+
+# eval: validation-only entry.
+# Uses the same frozen vocab, cache, and split conventions as training.
+eval:
+  checkpoint_path: "./artifacts_smoke/train/checkpoints/last.pt"  # Relative to project root unless absolute.
+  val_split_path: "./artifacts_smoke/splits/val.csv"  # Validation split CSV.
+  cache_index_path: "./data/cache_smoke/train_cache/cache_index.csv"  # Cache index used to materialize eval samples.
+  batch_size: 2  # Eval batch size; can be larger than training if memory allows.
+  num_workers: 0  # DataLoader workers for validation.
+  device: "cuda"  # Preferred eval device.
+  output_dir: "./artifacts_smoke/metrics"  # Directory for eval metrics and optional predictions.
+  save_predictions: false  # True writes per-sample predictions CSV.
+  metrics_filename: "val_metrics.json"  # Eval metric JSON filename under output_dir.
+  predictions_filename: "val_predictions.csv"  # Optional eval predictions CSV filename.
+
+# infer / generate: inference entry for sampling or argmax generation.
+# top_k and temperature only matter when sampling=true.
+infer:
+  checkpoint_path: "./artifacts_smoke/train/checkpoints/last.pt"  # Relative to project root unless absolute.
+  input_split_path: "./artifacts_smoke/splits/val.csv"  # Input split CSV for inference-time samples.
+  cache_index_path: "./data/cache_smoke/train_cache/cache_index.csv"  # Cache index used to load inference samples.
+  device: "cuda"  # Preferred inference device.
+  batch_size: 2  # Inference batch size.
+  num_workers: 0  # DataLoader workers for inference.
+  output_dir: "./artifacts_smoke/infer"  # Directory for generated predictions and summary.
+  output_filename: "infer_predictions.csv"  # Main inference output CSV.
+  summary_filename: "infer_summary.json"  # Summary JSON for run metadata.
+  top_k: 1  # Candidate cutoff when sampling; ignored when sampling=false.
+  temperature: 1.0  # Softmax temperature used only for sampling.
+  sampling: false  # False uses argmax; true enables stochastic generation.
+  max_steps: 5  # 0 means process the full loader; useful for debug runs.
+  seed: 42  # Reproducibility for stochastic sampling and data order.
+
+# debug (reserved): temporary local toggles only.
+# If a future debug.allow_train_on_full_cache flag is introduced, keep it false
+# outside of one-off debugging because it can leak train/val boundaries.

@@ -1,0 +1,42 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local env files
+.env
+.env.*
+
+# Temporary test outputs
+.tmp_test_*/
+
+# Training / evaluation / inference outputs
+artifacts/
+artifacts_smoke/
+outputs/
+outputs_smoke/
+logs/
+
+# Data caches and generated manifests
+data/cache/
+data/cache_smoke/
+**/train_cache_shard_*.pt
+**/train_cache_shard_*.npz
+**/cache_index.csv
+**/manifest.csv
+
+# Model checkpoints and run logs
+**/checkpoints/*.pt
+**/train_log.jsonl
+**/metrics.json
+**/*_metrics.json
+**/*_predictions.csv
+
+# OS/editor files
+.DS_Store
+Thumbs.db
