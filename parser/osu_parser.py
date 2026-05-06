@@ -36,22 +36,83 @@ from typing import Dict, List, Optional
 
 from config_loader import get_config_value
 
-# 7-key mania x-coordinate mapping used by osu! stable exports.
-DEFAULT_LANE_X_TO_INDEX = {
-    36: 0,
-    109: 1,
-    182: 2,
-    256: 3,
-    329: 4,
-    402: 5,
-    475: 6,
+# Mania x-coordinate mappings used by osu! stable exports.
+DEFAULT_LANE_X_TO_INDEX_BY_KEYCOUNT = {
+    4: {
+        64: 0,
+        192: 1,
+        320: 2,
+        448: 3,
+    },
+    5: {
+        64: 0,
+        153: 1,
+        256: 2,
+        358: 3,
+        448: 4,
+    },
+    6: {
+        42: 0,
+        128: 1,
+        213: 2,
+        298: 3,
+        384: 4,
+        469: 5,
+    },
+    7: {
+        36: 0,
+        109: 1,
+        182: 2,
+        256: 3,
+        329: 4,
+        402: 5,
+        475: 6,
+    },
+    8: {
+        32: 0,
+        96: 1,
+        160: 2,
+        224: 3,
+        288: 4,
+        352: 5,
+        416: 6,
+        480: 7,
+    },
+    9: {
+        28: 0,
+        85: 1,
+        142: 2,
+        199: 3,
+        256: 4,
+        312: 5,
+        369: 6,
+        426: 7,
+        483: 8,
+    },
+    10: {
+        25: 0,
+        76: 1,
+        128: 2,
+        179: 3,
+        230: 4,
+        281: 5,
+        332: 6,
+        384: 7,
+        435: 8,
+        486: 9,
+    },
 }
 
 
-def _load_lane_mapping() -> dict[int, int]:
-    raw_mapping = get_config_value("chart.lane_x_to_index", None)
+def _load_lane_mapping(key_count: int) -> dict[int, int]:
+    raw_mapping = get_config_value(f"chart.lane_x_to_index_by_keycount.{key_count}", None)
     if not isinstance(raw_mapping, dict):
-        return dict(DEFAULT_LANE_X_TO_INDEX)
+        # Backward compatibility for existing 7k config key.
+        if key_count == 7:
+            raw_mapping = get_config_value("chart.lane_x_to_index", None)
+
+    if not isinstance(raw_mapping, dict):
+        return dict(DEFAULT_LANE_X_TO_INDEX_BY_KEYCOUNT.get(key_count, {}))
 
     parsed: dict[int, int] = {}
     for raw_k, raw_v in raw_mapping.items():
@@ -61,7 +122,7 @@ def _load_lane_mapping() -> dict[int, int]:
         except (TypeError, ValueError):
             continue
         parsed[k] = v
-    return parsed or dict(DEFAULT_LANE_X_TO_INDEX)
+    return parsed or dict(DEFAULT_LANE_X_TO_INDEX_BY_KEYCOUNT.get(key_count, {}))
 
 
 def _split_key_value(line: str) -> Optional[tuple[str, str]]:
@@ -119,7 +180,7 @@ def _parse_timing_point(line: str) -> Optional[dict]:
     }
 
 
-def _parse_hit_object(line: str) -> Optional[dict]:
+def _parse_hit_object(line: str, lane_map: dict[int, int]) -> Optional[dict]:
     """
     Parse one HitObjects line for mania 7k.
 
@@ -137,7 +198,6 @@ def _parse_hit_object(line: str) -> Optional[dict]:
     if x is None or time_ms is None or hit_type is None:
         return None
 
-    lane_map = _load_lane_mapping()
     lane = lane_map.get(x)
     if lane is None:
         return None
@@ -172,10 +232,10 @@ def parse_osu(file_path: str) -> Dict[str, object]:
               `{"time_ms": int, "lane": int, "end_time_ms": None}`.
 
     Important notes:
-        - Only mania is supported. If `Mode` is present and not `3`, a
-          `ValueError` is raised.
-        - Only 7k charts are supported. If `CircleSize` is missing, defaults to
-          `7`; if present but not `7`, a `ValueError` is raised.
+        - Only mania is supported. `Mode` must be present and equal to `3`,
+          otherwise a `ValueError` is raised.
+        - Only key counts in `{4,5,6,7,8,9,10}` are supported. `CircleSize`
+          must be present and in this set, otherwise a `ValueError` is raised.
         - Malformed lines are skipped safely instead of aborting parse.
         - Irrelevant sections are ignored.
         - LN data is intentionally reduced to start notes only (`end_time_ms=None`)
@@ -230,24 +290,45 @@ def parse_osu(file_path: str) -> Dict[str, object]:
                 continue
 
             if current_section == "HitObjects":
-                ho = _parse_hit_object(line)
+                if key_count is None:
+                    # Difficulty/CircleSize is required; postpone strict failure
+                    # to the validation block below.
+                    continue
+                lane_map = _load_lane_mapping(key_count)
+                ho = _parse_hit_object(line, lane_map)
                 if ho is not None:
                     hit_objects.append(ho)
                 continue
 
     expected_mode = int(get_config_value("chart.expected_mode", 3))
-    if mode is not None and mode != expected_mode:
+    if mode is None:
+        raise ValueError("Missing Mode in [General]; expected mania Mode=3.")
+    if mode != expected_mode:
         raise ValueError(
             f"Unsupported Mode={mode}; expected mania Mode={expected_mode}."
         )
 
-    expected_key_count = int(get_config_value("chart.key_count", 7))
-    if key_count is None:
-        key_count = expected_key_count
+    allowed_key_counts_raw = get_config_value(
+        "chart.allowed_key_counts", [4, 5, 6, 7, 8, 9, 10]
+    )
+    allowed_key_counts = {
+        int(v)
+        for v in (allowed_key_counts_raw or [])
+        if isinstance(v, (int, float, str))
+    }
+    if not allowed_key_counts:
+        allowed_key_counts = {4, 5, 6, 7, 8, 9, 10}
 
-    if key_count != expected_key_count:
+    if key_count is None:
         raise ValueError(
-            f"Unsupported CircleSize={key_count}; expected {expected_key_count}k."
+            "Missing CircleSize in [Difficulty]; expected one of "
+            f"{sorted(allowed_key_counts)}."
+        )
+
+    if key_count not in allowed_key_counts:
+        raise ValueError(
+            "Unsupported CircleSize="
+            f"{key_count}; expected one of {sorted(allowed_key_counts)}."
         )
 
     if general_audio_filename:
